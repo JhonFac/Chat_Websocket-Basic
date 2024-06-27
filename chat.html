@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>Chat App Template</title>
+    <link rel="stylesheet" href="bootstrap3.3/css/bootstrap.min.css">
+    <link rel="stylesheet" href="chat.css">
+</head>
+<body>
+    <div id="app" class="app">
+
+        <!-- LEFT SECTION -->
+        <section id="main-left" class="main-left">
+            <!-- header -->
+            <div id="header-left" class="header-left">
+                <span class="glyphicon glyphicon-menu-hamburger hamburger-btn"></span>
+                <span class="glyphicon glyphicon-search search-btn"></span>
+                <span class="glyphicon glyphicon-option-vertical option-btn"></span>
+            </div>
+
+            <!-- chat list -->
+            <div id="chat-list" class="chat-list">
+                <!-- user lists -->
+                <div id="userList">
+                    <h5 class="mb-3">Lista de usuarios</h5>
+                    <!-- Lista de usuarios -->
+                </div>
+            </div>
+
+            <!-- self-profile -->
+            <div id="self-info" class="self-info">
+                <!-- photo -->
+                <div class="profile your-photo">
+                    <img src="images/ava4.jpg" alt="">
+                </div>
+                <!-- name -->
+                <h4 class="name your-name" id="loggedInUserName"></h4>
+                <!-- setting btn -->
+                <span class="glyphicon glyphicon-cog"></span>
+            </div>
+        </section>
+
+        <!-- RIGHT SECTION -->
+        <section id="main-right" class="main-right">
+
+            <div id="main-image" class="main-image">
+            </div>
+
+            <!-- header -->
+            <div id="header-right" class="header-right">
+                <!-- profile pict -->
+                <div id="header-img" class="profile header-img">
+                    <img src="images/ava2.jpg" alt="">
+                </div>
+
+                <!-- name -->
+                <h4 class="name friend-name" id="chatHeader">Chat con:</h4>
+
+                <!-- some btn -->
+                <div class="some-btn">
+                    <span class="glyphicon glyphicon-facetime-video"></span>
+                    <span class="glyphicon glyphicon-earphone"></span>
+                    <span class="glyphicon glyphicon-option-vertical option-btn"></span>
+                </div>
+            </div>
+
+            <!-- chat area -->
+            <div id="chat-area" class="chat-area">
+                <div id="chatMessages" class="chat-messages">
+                    <!-- Mensajes del chat -->
+                </div>
+            </div>
+
+            <!-- typing area -->
+            <div id="typing-area" class="typing-area">
+                <!-- input form -->
+                <input id="messageInput" class="type-area" placeholder="Escribe tu mensaje">
+                <!-- attachment btn -->
+                <div class="attach-btn">
+                    <span class="glyphicon glyphicon-paperclip file-btn"></span>
+                    <span class="glyphicon glyphicon-camera"></span>
+                    <span class="glyphicon glyphicon-picture"></span>
+                </div>
+                <!-- send btn -->
+                <span id="sendMessageButton" class="glyphicon glyphicon-send send-btn"></span>
+            </div>
+        </section>
+    </div>
+
+    <!-- jQuery, Popper, BootstrapJS -->
+    <script src="bootstrap3.3/js/jquery-3.3.1.min.js"></script>
+    <script src="bootstrap3.3/js/bootstrap.min.js"></script>
+    <script>
+        let websocket;
+        let currentRecipient = null;
+        const userList = $('#userList');
+        const chatMessages = $('#chatMessages');
+
+        function connectWebSocket(name) {
+            websocket = new WebSocket("ws://localhost:8765");
+
+            websocket.onopen = function() {
+                websocket.send(JSON.stringify({ event: "connect", name: name }));
+            };
+
+            websocket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+
+                if (data.event === "message") {
+                    saveMessage(data.sender, data.recipient, data.message, "received");
+                    console.log(data);
+                    if (data.sender === currentRecipient) {
+                        addMessage(data.message, "received", data.date);
+                    }
+                } else if (data.event === "list_users") {
+                    updateUsersList(data.users);
+                }
+            };
+
+            websocket.onclose = function() {
+                console.log("Conexión cerrada.");
+            };
+
+            websocket.onerror = function(event) {
+                console.error("Error en la conexión:", event);
+            };
+        }
+
+        function updateUsersList(users) {
+            userList.empty();
+            users.forEach(user => {
+                const savedName = localStorage.getItem("username");
+                if (user == savedName) return;
+
+                const userItem = $('<div class="friends"></div>');
+                const userProfile = $('<div class="profile friends-photo"><img src="images/ava2.jpg" alt=""></div>');
+                const userCredentials = $('<div class="friends-credent"></div>');
+                const userName = $('<span class="friends-name"></span>').text(user);
+
+                userItem.data('username', user);
+
+                userCredentials.append(userName);
+                userItem.append(userProfile).append(userCredentials);
+
+                userItem.click(function() {
+                    $('#main-image').hide();
+                    console.log("Imagen de fondo quitada");
+                    $('.friends').removeClass('active');
+                    userItem.addClass('active');
+                    currentRecipient = user;
+                    loadChatMessages(user);
+                    $('#chatHeader').text(`Chat con: ${user}`);
+                });
+
+
+                userList.append(userItem);
+            });
+        }
+
+        function addMessage(message, type, date) {
+            const messageElement = $('<div></div>');
+
+            if (type === "sent") {
+                messageElement.addClass('your-chat');
+                messageElement.html(`
+                    <p class="your-chat-balloon">${message}</p>
+                    <p class="chat-datetime"><span class="glyphicon glyphicon-ok"></span> ${new Date(date).toLocaleString()}</p>
+                `);
+            } else {
+                messageElement.addClass('friends-chat');
+                messageElement.html(`
+                    <div class="profile friends-chat-photo"><img src="images/ava2.jpg" alt=""></div>
+                    <div class="friends-chat-content">
+                        <p class="friends-chat-name">${currentRecipient}</p>
+                        <p class="friends-chat-balloon">${message}</p>
+                        <h5 class="chat-datetime">${new Date(date).toLocaleString()}</h5>
+                    </div>
+                `);
+            }
+
+            chatMessages.append(messageElement);
+            // chatMessages.scrollTop(chatMessages[0].scrollHeight);
+            scrollToBottom();
+        }
+
+        function saveMessage(sender, recipient, message, type) {
+            const currentUser = localStorage.getItem('username');
+            let chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
+            let chat_user = (type === 'sent') ? recipient : sender;
+
+            let recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(chat_user));
+
+            if (!recipientMessages) {
+                recipientMessages = {};
+                recipientMessages[chat_user] = [];
+                chatData.messages.push(recipientMessages);
+            }
+
+            const messageObj = {
+                type: type,
+                message: message,
+                date: new Date().toISOString()
+            };
+
+            recipientMessages[chat_user].push(messageObj);
+            localStorage.setItem('chatData', JSON.stringify(chatData));
+            
+            // Desplazar hacia abajo después de agregar el mensaje
+            scrollToBottom();
+            scrollToBottom();
+        }
+
+        function loadChatMessages(user) {
+            chatMessages.empty();
+            const currentUser = localStorage.getItem('username');
+            const chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
+
+            const recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(user));
+
+            if (recipientMessages && recipientMessages.hasOwnProperty(user)) {
+                const messages = recipientMessages[user];
+                messages.forEach(msg => {
+                    const type = msg.type;
+                    addMessage(msg.message, type, msg.date);
+                });
+            }
+            scrollToBottom();
+        }
+
+        function scrollToBottom() {
+          const chatArea = document.getElementById('chat-area'); 
+          // Scroll hacia abajo
+          chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        $('#sendMessageButton').click(function() {
+            const message = $('#messageInput').val().trim();
+            if (message && currentRecipient) {
+                const data = {
+                    event: "message",
+                    recipient: currentRecipient,
+                    message: message,
+                    sender: localStorage.getItem("username")
+                };
+                websocket.send(JSON.stringify(data));
+                saveMessage(localStorage.getItem("username"), currentRecipient, message, "sent");
+                addMessage(message, "sent", new Date().toISOString());
+                $('#messageInput').val('');
+            } else {
+                alert("Selecciona un usuario y escribe un mensaje.");
+            }
+        });
+
+        $('#messageInput').keypress(function(e) {
+            if (e.which == 13) {
+                $('#sendMessageButton').click();
+                return false;
+            }
+        });
+
+        window.onload = function() {
+            const savedName = localStorage.getItem("username");
+            if (savedName) {
+                $('#loggedInUserName').text(savedName);
+                connectWebSocket(savedName);
+            } else {
+                const name = prompt("Introduce tu nombre:");
+                if (name) {
+                    localStorage.setItem("username", name);
+                    $('#loggedInUserName').text(name);
+                    connectWebSocket(name);
+                }
+            }
+        };
+    </script>
+</body>
+</html>
