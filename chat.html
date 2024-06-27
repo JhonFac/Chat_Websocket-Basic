@@ -11,6 +11,15 @@
 <body>
     <div id="app" class="app">
 
+        <!-- Modal de error de conexión -->
+        <div id="connectionErrorModal" class="modal-overlay" style="display: none;">
+            <div class="alert alert-danger d-flex align-items-center" role="alert">
+                <div>
+                    No se logró conectar al servidor. <br>Por favor, inténtalo de nuevo más tarde.
+                </div>
+            </div>
+        </div>
+
         <!-- LEFT SECTION -->
         <section id="main-left" class="main-left">
             <!-- header -->
@@ -38,7 +47,7 @@
                 <!-- name -->
                 <h4 class="name your-name" id="loggedInUserName"></h4>
                 <!-- setting btn -->
-                <span class="glyphicon glyphicon-cog"></span>
+                <span class="glyphicon glyphicon-cog" id="clearCache"></span>
             </div>
         </section>
 
@@ -56,7 +65,7 @@
                 </div>
 
                 <!-- name -->
-                <h4 class="name friend-name" id="chatHeader">Chat con:</h4>
+                <h4 class="name friend-name" id="chatHeader"></h4>
 
                 <!-- some btn -->
                 <div class="some-btn">
@@ -97,12 +106,19 @@
         let currentRecipient = null;
         const userList = $('#userList');
         const chatMessages = $('#chatMessages');
+        let reconnectInterval;
+
 
         function connectWebSocket(name) {
             websocket = new WebSocket("ws://localhost:8765");
 
             websocket.onopen = function() {
+                console.log('1',reconnectInterval);
+                if (reconnectInterval) {
+                    clearInterval(reconnectInterval); // Limpiar el intervalo de reconexión cuando la conexión se reestablece
+                }
                 websocket.send(JSON.stringify({ event: "connect", name: name }));
+                hideConnectionErrorModal();
             };
 
             websocket.onmessage = function(event) {
@@ -120,41 +136,88 @@
             };
 
             websocket.onclose = function() {
+                console.log('2',reconnectInterval);
+                showConnectionErrorModal();
                 console.log("Conexión cerrada.");
+                startReconnectInterval(name);
             };
 
             websocket.onerror = function(event) {
+                console.log('3',reconnectInterval);
+                showConnectionErrorModal();
                 console.error("Error en la conexión:", event);
+                startReconnectInterval(name);
             };
+        }
+
+        function startReconnectInterval(name) {
+            console.log('4',reconnectInterval);
+            if (!reconnectInterval) {
+                console.log('5',reconnectInterval);
+                reconnectInterval = setInterval(() => {
+                    console.log("Intentando reconectar...");
+                    connectWebSocket(name);
+                }, 5000);
+            }
         }
 
         function updateUsersList(users) {
             userList.empty();
+
             users.forEach(user => {
                 const savedName = localStorage.getItem("username");
                 if (user == savedName) return;
 
-                const userItem = $('<div class="friends"></div>');
+                // Crear elementos HTML
+                const userItem = $(`<div class="friends" id="friend-${user.replace(/\s/g, '-')}"></div>`).attr('value', user);
                 const userProfile = $('<div class="profile friends-photo"><img src="images/ava2.jpg" alt=""></div>');
                 const userCredentials = $('<div class="friends-credent"></div>');
                 const userName = $('<span class="friends-name"></span>').text(user);
+                const lastMessage = $('<span class="friends-message"></span>');
+                const notificationBadge = $('<span class="badge notif-badge"></span>');
+                notificationBadge.hide();
 
                 userItem.data('username', user);
 
-                userCredentials.append(userName);
-                userItem.append(userProfile).append(userCredentials);
+                // Obtener mensajes guardados
+                const chatData = JSON.parse(localStorage.getItem('chatData')) || { user: savedName, messages: [] };
+                const recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(user));
 
+                // Mostrar último mensaje recibido o enviado
+                if (recipientMessages && recipientMessages[user]) {
+                    const lastMsg = recipientMessages[user].slice(-1)[0];
+                    lastMessage.text(lastMsg.message);
+                }
+
+                // Mostrar contador de mensajes no leídos
+                let unreadCount = 0;
+                if (recipientMessages && recipientMessages[user]) {
+                    recipientMessages[user].forEach(msg => {
+                        if (msg.type === 'received' && !msg.read) {
+                            unreadCount++;
+                        }
+                    });
+                }
+                if (unreadCount > 0) {
+                    notificationBadge.text(unreadCount);
+                    notificationBadge.show();
+                }
+
+                // Agregar evento clic para seleccionar usuario
                 userItem.click(function() {
                     $('#main-image').hide();
-                    console.log("Imagen de fondo quitada");
                     $('.friends').removeClass('active');
                     userItem.addClass('active');
                     currentRecipient = user;
                     loadChatMessages(user);
                     $('#chatHeader').text(`Chat con: ${user}`);
+                    notificationBadge.hide() // Reiniciar contador de notificaciones
+                    markMessagesAsRead(user); // Actualizar estado en el caché a 'read: true'
                 });
 
-
+                // Añadir elementos al DOM
+                userCredentials.append(userName).append(lastMessage);
+                userItem.append(userProfile).append(userCredentials).append(notificationBadge);
                 userList.append(userItem);
             });
         }
@@ -181,7 +244,59 @@
             }
 
             chatMessages.append(messageElement);
-            // chatMessages.scrollTop(chatMessages[0].scrollHeight);
+            scrollToBottom();
+        }
+
+        function updateUserMessageStatus(user) {
+            console.log(user);
+
+            const currentUser = localStorage.getItem('username');
+            const chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
+
+            const recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(user));
+
+            if (recipientMessages && recipientMessages.hasOwnProperty(user)) {
+                const messages = recipientMessages[user];
+                let unreadCount = 0;
+                let lastMessage = null;
+
+                messages.forEach(msg => {
+                    if (!msg.read) {
+                        unreadCount++;
+                    }
+                    lastMessage = msg; // Guardar el último mensaje para mostrarlo
+                });
+                // Mostrar el último mensaje debajo del nombre del usuario
+                if (lastMessage) {
+                    $(`#friend-${user.replace(/\s/g, '-')}`).find('.friends-message').text(lastMessage.message);
+                }
+                // Actualizar la cuenta de mensajes no leídos
+                const notificationBadge = $(`#friend-${user.replace(/\s/g, '-')}`).find('.notif-badge');
+                notificationBadge.text(unreadCount);
+                notificationBadge.hide();
+                if (unreadCount > 0) {
+                    notificationBadge.show();
+                }
+            }
+        }
+
+        function loadChatMessages(user) {
+            chatMessages.empty();
+            const currentUser = localStorage.getItem('username');
+            const chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
+
+            const recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(user));
+
+            if (recipientMessages && recipientMessages.hasOwnProperty(user)) {
+                const messages = recipientMessages[user];
+                messages.forEach(msg => {
+                    const type = msg.type;
+                    addMessage(msg.message, type, msg.date);
+                });
+            }
+
+            // Actualizar estado de mensajes y último mensaje
+            updateUserMessageStatus(user);
             scrollToBottom();
         }
 
@@ -201,31 +316,19 @@
             const messageObj = {
                 type: type,
                 message: message,
-                date: new Date().toISOString()
+                date: new Date().toISOString(),
+                read: false  // Marca para indicar que el mensaje no se ha leído
             };
 
             recipientMessages[chat_user].push(messageObj);
             localStorage.setItem('chatData', JSON.stringify(chatData));
             
-            // Desplazar hacia abajo después de agregar el mensaje
-            scrollToBottom();
-            scrollToBottom();
-        }
-
-        function loadChatMessages(user) {
-            chatMessages.empty();
-            const currentUser = localStorage.getItem('username');
-            const chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
-
-            const recipientMessages = chatData.messages.find(msg => msg.hasOwnProperty(user));
-
-            if (recipientMessages && recipientMessages.hasOwnProperty(user)) {
-                const messages = recipientMessages[user];
-                messages.forEach(msg => {
-                    const type = msg.type;
-                    addMessage(msg.message, type, msg.date);
-                });
+            if (type === 'received') {
+                // Después de guardar el mensaje, actualizar el estado del usuario
+                updateUserMessageStatus(chat_user);                
             }
+
+            // Desplazar hacia abajo después de agregar el mensaje
             scrollToBottom();
         }
 
@@ -234,6 +337,38 @@
           // Scroll hacia abajo
           chatArea.scrollTop = chatArea.scrollHeight;
         }
+
+        function markMessagesAsRead(user) {
+            const currentUser = localStorage.getItem('username');
+            let chatData = JSON.parse(localStorage.getItem('chatData')) || { user: currentUser, messages: [] };
+
+            // Buscar y actualizar mensajes del usuario seleccionado
+            chatData.messages.forEach(msgGroup => {
+                if (msgGroup[user]) {
+                    msgGroup[user].forEach(msg => {
+                        msg.read = true;  // Marcar mensaje como leído
+                    });
+                }
+            });
+
+            // Actualizar el caché
+            localStorage.setItem('chatData', JSON.stringify(chatData));
+        }
+
+        function showConnectionErrorModal() {
+            $('#connectionErrorModal').show();
+        }
+
+        function hideConnectionErrorModal() {
+            $('#connectionErrorModal').hide();
+        }
+        
+        $('#main-right').click(function() {
+            if (currentRecipient) {
+                markMessagesAsRead(currentRecipient); // Actualizar estado en el caché a 'read: true'
+                updateUserMessageStatus(currentRecipient);
+            }
+        });
 
         $('#sendMessageButton').click(function() {
             const message = $('#messageInput').val().trim();
@@ -258,6 +393,12 @@
                 $('#sendMessageButton').click();
                 return false;
             }
+        });
+
+        $('#clearCache').click(function() {
+            localStorage.clear(); // Limpiar localStorage
+            sessionStorage.clear(); // Limpiar sessionStorage si es necesario
+            location.reload(); // Recargar la página
         });
 
         window.onload = function() {
